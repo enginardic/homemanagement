@@ -219,7 +219,23 @@ export default function App() {
       if (newExpense.planned_amount) payload.planned_amount = parseFloat(newExpense.planned_amount)
       if (newExpense.amount)         payload.amount         = parseFloat(newExpense.amount)
       await db.insertExpense(payload)
-      toast('✓ Kaydedildi')
+
+      // Tekrar eden işaretliyse favorilere de ekle (aynısı yoksa)
+      if (newExpense.recurring) {
+        const already = templates.some(t => t.type === 'expense' && t.title.toLowerCase() === newExpense.title.toLowerCase())
+        if (!already) {
+          await db.insertRecurringTemplate({
+            type: 'expense', title: newExpense.title,
+            amount: parseFloat(newExpense.amount || newExpense.planned_amount || '0'),
+            category: newExpense.category, member_id: newExpense.member_id || null,
+            payment_method: newExpense.payment_method, payment_details: newExpense.payment_details,
+            frequency: 'monthly', day_of_month: 1,
+          })
+          const tpl = await db.getRecurringTemplates(); setTemplates(tpl)
+        }
+      }
+
+      toast(newExpense.recurring ? '✓ Kaydedildi ve favorilere eklendi ⭐' : '✓ Kaydedildi')
       setNewExpense({ title:'', planned_amount:'', amount:'', category:'market', date:today(), member_id: currentMember ? String(currentMember.id) : '', planned:false, realized:false, recurring:false, payment_method:'cash', payment_details:'' })
       loadPeriod()
     } catch(e: any) { toast('✗ ' + e.message) }
@@ -256,7 +272,22 @@ export default function App() {
       if (newIncome.planned_amount) payload.planned_amount = parseFloat(newIncome.planned_amount)
       if (newIncome.amount)         payload.amount         = parseFloat(newIncome.amount)
       await db.insertIncome(payload)
-      toast('✓ Kaydedildi')
+
+      // Tekrar eden işaretliyse favorilere de ekle (aynısı yoksa)
+      if (newIncome.recurring) {
+        const already = templates.some(t => t.type === 'income' && t.title.toLowerCase() === newIncome.title.toLowerCase())
+        if (!already) {
+          await db.insertRecurringTemplate({
+            type: 'income', title: newIncome.title,
+            amount: parseFloat(newIncome.amount || newIncome.planned_amount || '0'),
+            source: newIncome.source, member_id: newIncome.member_id || null,
+            frequency: 'monthly', day_of_month: 1,
+          })
+          const tpl = await db.getRecurringTemplates(); setTemplates(tpl)
+        }
+      }
+
+      toast(newIncome.recurring ? '✓ Kaydedildi ve favorilere eklendi ⭐' : '✓ Kaydedildi')
       setNewIncome({ title:'', planned_amount:'', amount:'', source:'maas', date:today(), member_id: currentMember ? String(currentMember.id) : '', planned:false, realized:false, recurring:false })
       loadPeriod()
     } catch(e: any) { toast('✗ ' + e.message) }
