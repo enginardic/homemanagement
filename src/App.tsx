@@ -3,7 +3,7 @@ import {
   PlusCircle, Trash2, Calendar, Home, CheckCircle, Circle,
   TrendingUp, TrendingDown, Wallet, Users, BarChart3, Copy,
   CreditCard, Building2, Utensils, ChevronRight, Edit2, X,
-  Download, LogOut, ChevronLeft, KeyRound, Tag, Bell, Shield, User, ArrowRightLeft
+  Download, LogOut, ChevronLeft, KeyRound, Tag, Bell, Shield, User, ArrowRightLeft, Star, RefreshCw
 } from 'lucide-react'
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuth } from './lib/auth'
@@ -26,7 +26,7 @@ const fmt    = (n: any) => parseFloat(n || 0).toLocaleString('tr-TR', { minimumF
 const fmtDate = (d: string) => { if (!d) return ''; const [y, m, day] = d.split('-'); return `${day}.${m}.${y}` }
 const today  = () => new Date().toISOString().split('T')[0]
 
-type Tab = 'overview'|'budget'|'members'|'incomes'|'expenses'|'tasks'|'categories'|'banks'|'cards'
+type Tab = 'overview'|'budget'|'members'|'incomes'|'expenses'|'transfers'|'templates'|'tasks'|'categories'|'banks'|'cards'
 
 export default function App() {
   const { user, signOut } = useAuth()
@@ -52,6 +52,8 @@ export default function App() {
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
   const [creditCards,  setCreditCards]  = useState<any[]>([])
   const [mealCards,    setMealCards]    = useState<any[]>([])
+  const [transfers,    setTransfers]    = useState<any[]>([])
+  const [templates,    setTemplates]    = useState<any[]>([])
   const [loading,      setLoading]      = useState(true)
   const [prevBalance,  setPrevBalance]  = useState(0)
 
@@ -81,6 +83,8 @@ export default function App() {
   const [newMealCard,    setNewMealCard]    = useState('')
   const [newPassword,    setNewPassword]    = useState({ next:'', confirm:'' })
   const [pwMsg,          setPwMsg]          = useState('')
+  const [newTransfer,    setNewTransfer]    = useState({ from_member_id:'', to_member_id:'', amount:'', description:'', date:today() })
+  const [newTemplate,    setNewTemplate]    = useState({ type:'expense', title:'', amount:'', category:'market', source:'maas', member_id:'', payment_method:'cash', payment_details:'', frequency:'monthly', day_of_month:'1' })
 
   const toast = (msg: string) => { setSaveStatus(msg); setTimeout(() => setSaveStatus(''), 2500) }
 
@@ -88,12 +92,14 @@ export default function App() {
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
-      let [m, e, i, t, c, b, ba, cc, mc] = await Promise.all([
+      let [m, e, i, t, c, b, ba, cc, mc, tr, tpl] = await Promise.all([
         db.getMembers(), db.getExpenses(month, year), db.getIncomes(month, year), db.getTasks(),
-        db.getCategories(), db.getBanks(), db.getBankAccounts(), db.getCreditCards(), db.getMealCards()
+        db.getCategories(), db.getBanks(), db.getBankAccounts(), db.getCreditCards(), db.getMealCards(),
+        db.getTransfers(), db.getRecurringTemplates()
       ])
       setExpenses(e); setIncomes(i); setTasks(t)  // setMembers aşağıda user bloğunda yapılır
       setCategories(c); setBanks(b); setBankAccounts(ba); setCreditCards(cc); setMealCards(mc)
+      setTransfers(tr); setTemplates(tpl)
 
       // Auto-add logged-in user as member if not already there
       if (user) {
@@ -295,6 +301,104 @@ export default function App() {
     toast('✓ Üye eklendi')
   }
 
+  // ── Virman / Borç-Alacak ────────────────────────────────────────────────
+  const handleAddTransfer = async () => {
+    if (!newTransfer.from_member_id || !newTransfer.to_member_id || !newTransfer.amount) { toast('⚠ Kimden, kime ve tutar gerekli'); return }
+    if (newTransfer.from_member_id === newTransfer.to_member_id) { toast('⚠ Aynı kişi seçilemez'); return }
+    try {
+      await db.insertTransfer({
+        from_member_id: parseInt(newTransfer.from_member_id),
+        to_member_id: parseInt(newTransfer.to_member_id),
+        amount: parseFloat(newTransfer.amount),
+        description: newTransfer.description,
+        date: newTransfer.date,
+      })
+      setNewTransfer({ from_member_id:'', to_member_id:'', amount:'', description:'', date:today() })
+      const tr = await db.getTransfers(); setTransfers(tr)
+      toast('✓ Virman eklendi')
+    } catch(e: any) { toast('✗ ' + e.message) }
+  }
+
+  const toggleTransferSettled = async (tr: any) => {
+    await db.updateTransfer(tr.id, { settled: !tr.settled, settled_date: !tr.settled ? today() : null })
+    const t = await db.getTransfers(); setTransfers(t)
+  }
+
+  const handleDeleteTransfer = async (id: number) => {
+    if (!confirm('Silinsin mi?')) return
+    await db.deleteTransfer(id)
+    const t = await db.getTransfers(); setTransfers(t)
+    toast('✓ Silindi')
+  }
+
+  // Üyeler arası net bakiye: kim kime ne kadar borçlu (sadece ödenmemiş virmanlar)
+  const getNetBalances = () => {
+    const net: Record<string, number> = {} // key: "fromId-toId" pozitif => from, to'ya borçlu
+    transfers.filter(t => !t.settled).forEach(t => {
+      const a = t.from_member_id, b = t.to_member_id
+      const key = a < b ? `${a}-${b}` : `${b}-${a}`
+      const sign = a < b ? 1 : -1
+      net[key] = (net[key] || 0) + sign * parseFloat(t.amount)
+    })
+    return Object.entries(net)
+      .filter(([, v]) => Math.abs(v) > 0.01)
+      .map(([key, v]) => {
+        const [id1, id2] = key.split('-').map(Number)
+        const debtorId = v > 0 ? id1 : id2
+        const creditorId = v > 0 ? id2 : id1
+        return { debtor: getMemberById(debtorId), creditor: getMemberById(creditorId), amount: Math.abs(v) }
+      })
+  }
+
+  // ── Tekrarlayan Şablonlar (Favoriler) ────────────────────────────────────
+  const handleAddTemplate = async () => {
+    if (!newTemplate.title || !newTemplate.amount) { toast('⚠ Başlık ve tutar gerekli'); return }
+    try {
+      const payload: Record<string, unknown> = {
+        type: newTemplate.type, title: newTemplate.title, amount: parseFloat(newTemplate.amount),
+        member_id: newTemplate.member_id || null, frequency: newTemplate.frequency,
+        day_of_month: parseInt(newTemplate.day_of_month) || 1,
+      }
+      if (newTemplate.type === 'expense') {
+        payload.category = newTemplate.category
+        payload.payment_method = newTemplate.payment_method
+        payload.payment_details = newTemplate.payment_details
+      } else {
+        payload.source = newTemplate.source
+      }
+      await db.insertRecurringTemplate(payload)
+      setNewTemplate({ type:'expense', title:'', amount:'', category:'market', source:'maas', member_id:'', payment_method:'cash', payment_details:'', frequency:'monthly', day_of_month:'1' })
+      const tpl = await db.getRecurringTemplates(); setTemplates(tpl)
+      toast('✓ Favorilere eklendi')
+    } catch(e: any) { toast('✗ ' + e.message) }
+  }
+
+  const handleApplyTemplate = async (tpl: any) => {
+    try {
+      if (tpl.type === 'expense') {
+        await db.insertExpense({
+          title: tpl.title, amount: parseFloat(tpl.amount), category: tpl.category,
+          date: today(), member_id: tpl.member_id, planned: false, realized: true,
+          recurring: true, payment_method: tpl.payment_method || 'cash', payment_details: tpl.payment_details || '',
+        })
+      } else {
+        await db.insertIncome({
+          title: tpl.title, amount: parseFloat(tpl.amount), source: tpl.source,
+          date: today(), member_id: tpl.member_id, planned: false, realized: true, recurring: true,
+        })
+      }
+      loadPeriod()
+      toast(`✓ "${tpl.title}" bu aya eklendi`)
+    } catch(e: any) { toast('✗ ' + e.message) }
+  }
+
+  const handleDeleteTemplate = async (id: number) => {
+    if (!confirm('Bu favori silinsin mi?')) return
+    await db.deleteRecurringTemplate(id)
+    const tpl = await db.getRecurringTemplates(); setTemplates(tpl)
+    toast('✓ Silindi')
+  }
+
   const handleChangePassword = async () => {
     if (!newPassword.next || newPassword.next !== newPassword.confirm) { setPwMsg('Şifreler eşleşmiyor'); return }
     if (newPassword.next.length < 6) { setPwMsg('En az 6 karakter'); return }
@@ -376,7 +480,8 @@ export default function App() {
   const TABS: {id:Tab;icon:any;label:string}[] = [
     {id:'overview',icon:Wallet,label:'Genel Bakış'},{id:'budget',icon:BarChart3,label:'Bütçe'},
     {id:'members',icon:Users,label:'Üyeler'},{id:'incomes',icon:TrendingUp,label:'Gelirler'},
-    {id:'expenses',icon:TrendingDown,label:'Giderler'},{id:'tasks',icon:Calendar,label:'Görevler'},
+    {id:'expenses',icon:TrendingDown,label:'Giderler'},{id:'transfers',icon:ArrowRightLeft,label:'Virman'},
+    {id:'templates',icon:Star,label:'Favoriler'},{id:'tasks',icon:Calendar,label:'Görevler'},
     {id:'categories',icon:Tag,label:'Kategoriler'},{id:'banks',icon:Building2,label:'Bankalar'},{id:'cards',icon:CreditCard,label:'Kartlar'}
   ]
 
@@ -928,6 +1033,136 @@ export default function App() {
                     )
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* ══ VİRMAN (Borç/Alacak) ══ */}
+            {activeTab==='transfers' && (
+              <div>
+                <div className="bg-gray-50 rounded-xl p-5 mb-5">
+                  <h3 className="font-semibold mb-4"><PlusCircle className="inline w-5 h-5 mr-1"/>Yeni Virman</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                    <select value={newTransfer.from_member_id} onChange={e=>setNewTransfer({...newTransfer,from_member_id:e.target.value})} className="px-4 py-2 border rounded-lg">
+                      <option value="">Kimden (borçlu)</option>
+                      {members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                    <select value={newTransfer.to_member_id} onChange={e=>setNewTransfer({...newTransfer,to_member_id:e.target.value})} className="px-4 py-2 border rounded-lg">
+                      <option value="">Kime (alacaklı)</option>
+                      {members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                    <input type="number" placeholder="Tutar (₺)" value={newTransfer.amount} onChange={e=>setNewTransfer({...newTransfer,amount:e.target.value})} className="px-4 py-2 border rounded-lg"/>
+                    <input type="text" placeholder="Açıklama (opsiyonel)" value={newTransfer.description} onChange={e=>setNewTransfer({...newTransfer,description:e.target.value})} className="px-4 py-2 border rounded-lg"/>
+                    <input type="date" value={newTransfer.date} onChange={e=>setNewTransfer({...newTransfer,date:e.target.value})} className="px-4 py-2 border rounded-lg"/>
+                  </div>
+                  <button onClick={handleAddTransfer} className="mt-3 bg-indigo-600 text-white py-2 px-5 rounded-lg hover:bg-indigo-700 font-semibold text-sm">Ekle</button>
+                </div>
+
+                {/* Net bakiyeler özeti */}
+                {getNetBalances().length > 0 && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 mb-5">
+                    <h3 className="font-semibold text-indigo-900 mb-3">Kim Kime Ne Kadar Borçlu</h3>
+                    <div className="space-y-2">
+                      {getNetBalances().map((n, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-white rounded-lg px-4 py-2.5">
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="font-semibold" style={{color:n.debtor?.color}}>{n.debtor?.name || '—'}</span>
+                            <ArrowRightLeft className="w-3.5 h-3.5 text-gray-400"/>
+                            <span className="font-semibold" style={{color:n.creditor?.color}}>{n.creditor?.name || '—'}</span>
+                          </div>
+                          <span className="font-bold text-indigo-600">{fmt(n.amount)} ₺</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  {transfers.length === 0 ? (
+                    <p className="text-gray-400 text-center py-8">Henüz virman kaydı yok</p>
+                  ) : transfers.map(tr => (
+                    <div key={tr.id} className={`border-l-4 ${tr.settled ? 'border-green-400 bg-green-50/40' : 'border-orange-400 bg-orange-50/40'} rounded-xl p-4 bg-white`}>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 text-sm mb-1">
+                            <span className="font-semibold" style={{color:tr.from_member?.color}}>{tr.from_member?.name || '—'}</span>
+                            <ArrowRightLeft className="w-3.5 h-3.5 text-gray-400"/>
+                            <span className="font-semibold" style={{color:tr.to_member?.color}}>{tr.to_member?.name || '—'}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${tr.settled?'bg-green-100 text-green-700':'bg-orange-100 text-orange-700'}`}>{tr.settled?'Ödendi':'Bekliyor'}</span>
+                          </div>
+                          {tr.description && <p className="text-sm text-gray-600">{tr.description}</p>}
+                          <p className="text-xs text-gray-400 mt-1">{fmtDate(tr.date)}{tr.settled_date ? ` · Ödeme: ${fmtDate(tr.settled_date)}` : ''}</p>
+                        </div>
+                        <div className="flex items-center gap-2 ml-3">
+                          <p className="text-xl font-bold text-indigo-600">{fmt(tr.amount)} ₺</p>
+                          <label className="flex items-center gap-1 text-xs cursor-pointer">
+                            <input type="checkbox" checked={tr.settled} onChange={()=>toggleTransferSettled(tr)}/>
+                          </label>
+                          <button onClick={()=>handleDeleteTransfer(tr.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4"/></button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ══ FAVORİLER (Tekrarlayan Şablonlar) ══ */}
+            {activeTab==='templates' && (
+              <div>
+                <div className="bg-gray-50 rounded-xl p-5 mb-5">
+                  <h3 className="font-semibold mb-4"><Star className="inline w-5 h-5 mr-1"/>Yeni Favori Şablon</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <select value={newTemplate.type} onChange={e=>setNewTemplate({...newTemplate,type:e.target.value})} className="px-4 py-2 border rounded-lg">
+                      <option value="expense">Gider</option>
+                      <option value="income">Gelir</option>
+                    </select>
+                    <input type="text" placeholder="Başlık (örn: Kira)" value={newTemplate.title} onChange={e=>setNewTemplate({...newTemplate,title:e.target.value})} className="px-4 py-2 border rounded-lg"/>
+                    <input type="number" placeholder="Tutar (₺)" value={newTemplate.amount} onChange={e=>setNewTemplate({...newTemplate,amount:e.target.value})} className="px-4 py-2 border rounded-lg"/>
+                    {newTemplate.type==='expense' ? (
+                      <select value={newTemplate.category} onChange={e=>setNewTemplate({...newTemplate,category:e.target.value})} className="px-4 py-2 border rounded-lg">
+                        {categories.map(c=><option key={c.key} value={c.key}>{c.name}</option>)}
+                      </select>
+                    ) : (
+                      <select value={newTemplate.source} onChange={e=>setNewTemplate({...newTemplate,source:e.target.value})} className="px-4 py-2 border rounded-lg">
+                        {Object.entries(INCOME_SOURCES).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}
+                      </select>
+                    )}
+                    <select value={newTemplate.member_id} onChange={e=>setNewTemplate({...newTemplate,member_id:e.target.value})} className="px-4 py-2 border rounded-lg">
+                      <option value="">Üye seçin</option>
+                      {members.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                    <select value={newTemplate.frequency} onChange={e=>setNewTemplate({...newTemplate,frequency:e.target.value})} className="px-4 py-2 border rounded-lg">
+                      <option value="monthly">Aylık</option>
+                      <option value="weekly">Haftalık</option>
+                    </select>
+                  </div>
+                  <button onClick={handleAddTemplate} className="mt-3 bg-indigo-600 text-white py-2 px-5 rounded-lg hover:bg-indigo-700 font-semibold text-sm">Favorilere Ekle</button>
+                </div>
+
+                {templates.length === 0 ? (
+                  <p className="text-gray-400 text-center py-8">Henüz favori şablon yok. Sık tekrarlayan gelir/giderlerinizi (kira, maaş, faturalar) buraya ekleyin, her ay tek tıkla ekleyin.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {templates.map(tpl => (
+                      <div key={tpl.id} className="bg-white border rounded-xl p-4">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${tpl.type==='expense'?'bg-red-100 text-red-600':'bg-green-100 text-green-600'}`}>{tpl.type==='expense'?'↓':'↑'}</span>
+                            <div>
+                              <p className="font-semibold text-sm">{tpl.title}</p>
+                              <p className="text-xs text-gray-400">{tpl.frequency==='monthly'?'Aylık':'Haftalık'}{tpl.member?` · ${tpl.member.name}`:''}</p>
+                            </div>
+                          </div>
+                          <button onClick={()=>handleDeleteTemplate(tpl.id)} className="text-red-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5"/></button>
+                        </div>
+                        <p className={`text-lg font-bold mb-3 ${tpl.type==='expense'?'text-red-600':'text-green-600'}`}>{tpl.type==='expense'?'-':'+'}{fmt(tpl.amount)} ₺</p>
+                        <button onClick={()=>handleApplyTemplate(tpl)} className="w-full bg-indigo-50 text-indigo-700 py-2 rounded-lg hover:bg-indigo-100 text-sm font-semibold flex items-center justify-center gap-1.5">
+                          <RefreshCw className="w-3.5 h-3.5"/>Bu Aya Ekle
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

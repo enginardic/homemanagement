@@ -159,3 +159,50 @@ export async function deleteMealCard(id: number) {
   const { error } = await supabase.from('meal_cards').delete().eq('id', id)
   if (error) throw error
 }
+
+// ─── Transfers (Virman / Borç-Alacak) ───────────────────────────────────────
+export async function getTransfers() {
+  const { data, error } = await supabase
+    .from('transfers')
+    .select('*, from_member:members!transfers_from_member_id_fkey(*), to_member:members!transfers_to_member_id_fkey(*)')
+    .order('date', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+export async function insertTransfer(t: Record<string, unknown>) {
+  const { data, error } = await supabase.from('transfers').insert(t as never)
+    .select('*, from_member:members!transfers_from_member_id_fkey(*), to_member:members!transfers_to_member_id_fkey(*)').single()
+  if (error) throw error
+  return data
+}
+export async function updateTransfer(id: number, t: Record<string, unknown>) {
+  const { data, error } = await supabase.from('transfers').update(t as never).eq('id', id)
+    .select('*, from_member:members!transfers_from_member_id_fkey(*), to_member:members!transfers_to_member_id_fkey(*)').single()
+  if (error) throw error
+  return data
+}
+export async function deleteTransfer(id: number) {
+  const { error } = await supabase.from('transfers').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ─── Recurring Templates (Favori Tekrarlayan İşlemler) ──────────────────────
+export async function getRecurringTemplates() {
+  const { data, error } = await supabase.from('recurring_templates').select('*, member:members(*)').order('created_at')
+  if (error) throw error
+  return data ?? []
+}
+export async function insertRecurringTemplate(t: Record<string, unknown>) {
+  const { data, error } = await supabase.from('recurring_templates').insert(t as never).select('*, member:members(*)').single()
+  if (error) throw error
+  return data
+}
+export async function updateRecurringTemplate(id: number, t: Record<string, unknown>) {
+  const { data, error } = await supabase.from('recurring_templates').update(t as never).eq('id', id).select('*, member:members(*)').single()
+  if (error) throw error
+  return data
+}
+export async function deleteRecurringTemplate(id: number) {
+  const { error } = await supabase.from('recurring_templates').delete().eq('id', id)
+  if (error) throw error
+}
