@@ -1,26 +1,31 @@
 {
   "name": "homemanagement",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist"
+    "deploy": "node bump-version.js && npm run build && gh-pages -d dist --repo https://enginardic@github.com/enginardic/homemanagement.git"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
     "lucide-react": "^0.383.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "recharts": "^3.8.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.27",
     "gh-pages": "^6.1.1",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.2.2",
     "vite": "^5.1.0"
-  }
+  },
+  "buildDate": "2026-04-07"
 }

@@ -1,11 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
-import type { Database } from '../types/database'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+const supabaseUrl = (import.meta as { env: Record<string, string> }).env.VITE_SUPABASE_URL
+const supabaseAnonKey = (import.meta as { env: Record<string, string> }).env.VITE_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Supabase URL ve Anon Key eksik. .env dosyasını kontrol edin.')
+  throw new Error('.env dosyasında VITE_SUPABASE_URL ve VITE_SUPABASE_ANON_KEY eksik!')
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseAnonKey)

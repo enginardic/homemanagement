@@ -1,150 +1,161 @@
 import { supabase } from './supabase'
-import type { Category, Expense, Budget } from '../types'
 
-// ─── Kategoriler ───────────────────────────────────────────────────────────
-
-export async function getCategories(): Promise<Category[]> {
-  const { data, error } = await supabase
-    .from('categories')
-    .select('*')
-    .order('name')
+// ─── Members ──────────────────────────────────────────────────────────────
+export async function getMembers() {
+  const { data, error } = await supabase.from('members').select('*').order('created_at')
   if (error) throw error
   return data ?? []
 }
-
-export async function createCategory(cat: Omit<Category, 'id' | 'created_at'>): Promise<Category> {
-  const { data, error } = await supabase
-    .from('categories')
-    .insert(cat)
-    .select()
-    .single()
+export async function upsertMember(m: { id?: number; name: string; role: string; color: string; email: string }) {
+  const { data, error } = await supabase.from('members').upsert(m as never).select().single()
   if (error) throw error
   return data
 }
-
-export async function updateCategory(id: string, cat: Partial<Category>): Promise<Category> {
-  const { data, error } = await supabase
-    .from('categories')
-    .update(cat)
-    .eq('id', id)
-    .select()
-    .single()
-  if (error) throw error
-  return data
-}
-
-export async function deleteCategory(id: string): Promise<void> {
-  const { error } = await supabase.from('categories').delete().eq('id', id)
+export async function deleteMember(id: number) {
+  const { error } = await supabase.from('members').delete().eq('id', id)
   if (error) throw error
 }
 
-// ─── Masraflar ─────────────────────────────────────────────────────────────
-
-export async function getExpenses(filters?: {
-  month?: number
-  year?: number
-  category_id?: string
-}): Promise<Expense[]> {
-  let query = supabase
-    .from('expenses')
-    .select(`*, category:categories(*)`)
-    .order('date', { ascending: false })
-
-  if (filters?.month && filters?.year) {
-    const start = `${filters.year}-${String(filters.month).padStart(2, '0')}-01`
-    const lastDay = new Date(filters.year, filters.month, 0).getDate()
-    const end = `${filters.year}-${String(filters.month).padStart(2, '0')}-${lastDay}`
-    query = query.gte('date', start).lte('date', end)
-  }
-
-  if (filters?.category_id) {
-    query = query.eq('category_id', filters.category_id)
-  }
-
-  const { data, error } = await query
+// ─── Categories ────────────────────────────────────────────────────────────
+export async function getCategories() {
+  const { data, error } = await supabase.from('categories').select('*').order('name')
   if (error) throw error
   return data ?? []
 }
-
-export async function createExpense(expense: Omit<Expense, 'id' | 'created_at' | 'updated_at' | 'category'>): Promise<Expense> {
-  const { data, error } = await supabase
-    .from('expenses')
-    .insert(expense)
-    .select(`*, category:categories(*)`)
-    .single()
+export async function upsertCategory(c: { key: string; name: string; color: string }) {
+  const { data, error } = await supabase.from('categories').upsert(c as never).select().single()
   if (error) throw error
   return data
 }
+export async function deleteCategory(key: string) {
+  const { error } = await supabase.from('categories').delete().eq('key', key)
+  if (error) throw error
+}
 
-export async function updateExpense(id: string, expense: Partial<Omit<Expense, 'category'>>): Promise<Expense> {
-  const { data, error } = await supabase
-    .from('expenses')
-    .update({ ...expense, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select(`*, category:categories(*)`)
-    .single()
+// ─── Expenses ──────────────────────────────────────────────────────────────
+export async function getExpenses(month?: number, year?: number) {
+  let q = supabase.from('expenses').select('*, member:members(*)').order('date', { ascending: false })
+  if (month && year) q = q.eq('month', month).eq('year', year)
+  const { data, error } = await q
+  if (error) throw error
+  return data ?? []
+}
+export async function insertExpense(e: Record<string, unknown>) {
+  const { data, error } = await supabase.from('expenses').insert(e as never).select('*, member:members(*)').single()
   if (error) throw error
   return data
 }
-
-export async function deleteExpense(id: string): Promise<void> {
+export async function updateExpense(id: number, e: Record<string, unknown>) {
+  const { data, error } = await supabase.from('expenses').update(e as never).eq('id', id).select('*, member:members(*)').single()
+  if (error) throw error
+  return data
+}
+export async function deleteExpense(id: number) {
   const { error } = await supabase.from('expenses').delete().eq('id', id)
   if (error) throw error
 }
 
-// ─── Bütçeler ──────────────────────────────────────────────────────────────
-
-export async function getBudgets(month: number, year: number): Promise<Budget[]> {
-  const { data, error } = await supabase
-    .from('budgets')
-    .select(`*, category:categories(*)`)
-    .eq('month', month)
-    .eq('year', year)
+// ─── Incomes ───────────────────────────────────────────────────────────────
+export async function getIncomes(month?: number, year?: number) {
+  let q = supabase.from('incomes').select('*, member:members(*)').order('date', { ascending: false })
+  if (month && year) q = q.eq('month', month).eq('year', year)
+  const { data, error } = await q
   if (error) throw error
   return data ?? []
 }
-
-export async function upsertBudget(budget: Omit<Budget, 'id' | 'created_at' | 'category'>): Promise<Budget> {
-  const { data, error } = await supabase
-    .from('budgets')
-    .upsert(budget, { onConflict: 'category_id,month,year' })
-    .select(`*, category:categories(*)`)
-    .single()
+export async function insertIncome(i: Record<string, unknown>) {
+  const { data, error } = await supabase.from('incomes').insert(i as never).select('*, member:members(*)').single()
   if (error) throw error
   return data
 }
-
-export async function deleteBudget(id: string): Promise<void> {
-  const { error } = await supabase.from('budgets').delete().eq('id', id)
+export async function updateIncome(id: number, i: Record<string, unknown>) {
+  const { data, error } = await supabase.from('incomes').update(i as never).eq('id', id).select('*, member:members(*)').single()
+  if (error) throw error
+  return data
+}
+export async function deleteIncome(id: number) {
+  const { error } = await supabase.from('incomes').delete().eq('id', id)
   if (error) throw error
 }
 
-// ─── Özet istatistikler ────────────────────────────────────────────────────
+// ─── Tasks ─────────────────────────────────────────────────────────────────
+export async function getTasks() {
+  const { data, error } = await supabase.from('tasks').select('*').order('due_date')
+  if (error) throw error
+  return data ?? []
+}
+export async function insertTask(t: Record<string, unknown>) {
+  const { data, error } = await supabase.from('tasks').insert(t as never).select().single()
+  if (error) throw error
+  return data
+}
+export async function updateTask(id: number, t: Record<string, unknown>) {
+  const { data, error } = await supabase.from('tasks').update(t as never).eq('id', id).select().single()
+  if (error) throw error
+  return data
+}
+export async function deleteTask(id: number) {
+  const { error } = await supabase.from('tasks').delete().eq('id', id)
+  if (error) throw error
+}
 
-export async function getMonthlySummary(month: number, year: number) {
-  const expenses = await getExpenses({ month, year })
+// ─── Banks / Cards ─────────────────────────────────────────────────────────
+export async function getBanks() {
+  const { data, error } = await supabase.from('banks').select('*').order('name')
+  if (error) throw error
+  return data ?? []
+}
+export async function insertBank(name: string) {
+  const { data, error } = await supabase.from('banks').insert({ name } as never).select().single()
+  if (error) throw error
+  return data
+}
+export async function deleteBank(id: number) {
+  const { error } = await supabase.from('banks').delete().eq('id', id)
+  if (error) throw error
+}
 
-  const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0)
-  const daysInMonth = new Date(year, month, 0).getDate()
+export async function getBankAccounts() {
+  const { data, error } = await supabase.from('bank_accounts').select('*, bank:banks(*)').order('account_name')
+  if (error) throw error
+  return data ?? []
+}
+export async function insertBankAccount(a: Record<string, unknown>) {
+  const { data, error } = await supabase.from('bank_accounts').insert(a as never).select('*, bank:banks(*)').single()
+  if (error) throw error
+  return data
+}
+export async function deleteBankAccount(id: number) {
+  const { error } = await supabase.from('bank_accounts').delete().eq('id', id)
+  if (error) throw error
+}
 
-  const byCategory: Record<string, { name: string; total: number; color: string; icon: string }> = {}
-  expenses.forEach((e) => {
-    const cid = e.category_id ?? 'other'
-    if (!byCategory[cid]) {
-      byCategory[cid] = {
-        name: e.category?.name ?? 'Diğer',
-        total: 0,
-        color: e.category?.color ?? '#6b7280',
-        icon: e.category?.icon ?? '📦',
-      }
-    }
-    byCategory[cid].total += Number(e.amount)
-  })
+export async function getCreditCards() {
+  const { data, error } = await supabase.from('credit_cards').select('*, bank:banks(*)').order('card_name')
+  if (error) throw error
+  return data ?? []
+}
+export async function insertCreditCard(c: Record<string, unknown>) {
+  const { data, error } = await supabase.from('credit_cards').insert(c as never).select('*, bank:banks(*)').single()
+  if (error) throw error
+  return data
+}
+export async function deleteCreditCard(id: number) {
+  const { error } = await supabase.from('credit_cards').delete().eq('id', id)
+  if (error) throw error
+}
 
-  return {
-    total,
-    count: expenses.length,
-    dailyAverage: total / daysInMonth,
-    byCategory: Object.values(byCategory).sort((a, b) => b.total - a.total),
-  }
+export async function getMealCards() {
+  const { data, error } = await supabase.from('meal_cards').select('*').order('name')
+  if (error) throw error
+  return data ?? []
+}
+export async function insertMealCard(name: string) {
+  const { data, error } = await supabase.from('meal_cards').insert({ name } as never).select().single()
+  if (error) throw error
+  return data
+}
+export async function deleteMealCard(id: number) {
+  const { error } = await supabase.from('meal_cards').delete().eq('id', id)
+  if (error) throw error
 }
